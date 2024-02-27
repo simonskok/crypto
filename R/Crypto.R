@@ -203,7 +203,7 @@ Update_Crypto_OHLC_Multiple_Granularity <- function(Granularity                 
 
             print(paste("Signal normalized by SPY."))
 
-            Signal             <- Add_Historical_Quantiles(Dataset            = Signal,
+            Signal             <- Add_Historical_Quantiles(Dataset               = Signal,
                                                            Hist_Quantile_Columns = Columns_to_normalize_by_BTC,
                                                            Filter_Nas            = F)
 
@@ -949,6 +949,8 @@ Add_Historical_Quantiles <- function(Dataset,
 
   Hist_Quantile_Columns    <-  unique(c(Hist_Quantile_Columns, Extra_Columns))
 
+  Signal                   <-  Dataset %>% data.frame()
+
   Dataset                  <-  Dataset %>% data.frame()
 
   Filter_At                <-  intersect(Hist_Quantile_Columns, c("BB_Width", "atr")) %>% intersect(colnames(Dataset), . )
@@ -991,7 +993,7 @@ Add_Historical_Quantiles <- function(Dataset,
 
       Columns_to_Merge_By           <-  if ( nrow(dplyr::group_keys(Dataset %>% dplyr::group_by(Symbol, Candle))) < nrow(Dataset)) (c("Symbol", "Candle", "Time")) else c("Symbol", "Candle")
 
-      Filteres_Dataset           <-  Dataset[Dataset$Symbol %in% Ticker | grepl(pattern = paste0(paste0(Ticker, "_"), collapse = "|") , x = Dataset$Symbol) , c(Columns_to_Merge_By, Hist_Quantile_Columns)] %>%
+      Filteres_Dataset              <-  Dataset[Dataset$Symbol %in% Ticker | grepl(pattern = paste0(paste0(Ticker, "_"), collapse = "|") , x = Dataset$Symbol) , c(Columns_to_Merge_By, Hist_Quantile_Columns)] %>%
 
                                         set_colnames(c(Columns_to_Merge_By, paste0(Hist_Quantile_Columns, "_now"))) %>% dplyr::mutate(Symbol = gsub("_Aggregated", "", Symbol))
 
@@ -1009,13 +1011,13 @@ Add_Historical_Quantiles <- function(Dataset,
 
       for (Col in Hist_Quantile_Columns) Dataset[[paste0(Col, "_now")]] <- Dataset[[paste0(Col, "_now")]] > Dataset[[ifelse(grepl("Relative_Value", Col), paste0(Col, "_", N), Col)]]
 
-      Dataset           <-  Dataset %>% dplyr::filter_at(dplyr::vars(all_of(paste0(Hist_Quantile_Columns, "_now"))), any_vars(!is.na(.)))
+      Dataset              <-   Dataset %>% dplyr::filter_at(dplyr::vars(all_of(paste0(Hist_Quantile_Columns, "_now"))), any_vars(!is.na(.)))
 
-      Unique_quantile      <-  unique(Past_Quantiles$Quantile)
+      Unique_quantile      <-   unique(Past_Quantiles$Quantile)
 
-      Replace_By           <-  if (Round_Quantile_down) tail(Unique_quantile[Unique_quantile < 0.5], 1) else head(Unique_quantile[Unique_quantile > 0.5], 1)
+      Replace_By           <-   if (Round_Quantile_down) tail(Unique_quantile[Unique_quantile < 0.5], 1) else head(Unique_quantile[Unique_quantile > 0.5], 1)
 
-      Dataset           <-  Dataset  %>% dplyr::mutate_at(.vars = dplyr::vars(all_of(paste0(Hist_Quantile_Columns, "_now"))),
+      Dataset              <-   Dataset  %>% dplyr::mutate_at(.vars = dplyr::vars(all_of(paste0(Hist_Quantile_Columns, "_now"))),
 
                                                                 .funs = function(x) {Sum <- sum(x);if (!is.na(Sum)) {if (!Round_Quantile_down) Sum <- Sum + 1;if (Sum > 0) Unique_quantile[Sum] else 0} else 0.5}) %>%
 
@@ -1027,41 +1029,45 @@ Add_Historical_Quantiles <- function(Dataset,
 
                                 set_colnames(c(Columns_to_Merge_By,  paste0("Past_Quantile_", colnames(.)[-c(1:(length(Columns_to_Merge_By)), ncol(.))]) , if ("Nrow" %in% colnames(.)) "Nrow"))
 
-      Symbol_to_Match           <- "BTC"
+      Symbol_to_Match      <-   "BTC"
 
-      Dataset                <- Dataset %>% dplyr::mutate_at(dplyr::vars(dplyr::contains(paste0("Past_Quantile_",Main_Symbol,"_Normalized"))), function(x) ifelse(.$Symbol == Symbol_to_Match, 0.5, x))
+      Dataset              <-   Dataset %>% dplyr::mutate_at(dplyr::vars(dplyr::contains(paste0("Past_Quantile_",Main_Symbol,"_Normalized"))), function(x) ifelse(.$Symbol == Symbol_to_Match, 0.5, x))
 
       if (nrow(Dataset) > 0){
 
-        Multiple_rows_per_ticker  <- if (max(table(Dataset$Symbol)) > 1) TRUE else FALSE
+        Signal            <- dplyr::left_join(Signal, Dataset, by = Columns_to_Merge_By)
 
-        Dataset                <- dplyr::left_join(Dataset, Dataset, by = Columns_to_Merge_By)
+        for (Col in Hist_Quantile_Columns){
 
-        for (Col in Hist_Quantile_Columns) { Replace_Values_Index <- (Dataset[[Col]] == 10000) %>% replace(., is.na(.), FALSE) ; Dataset[Replace_Values_Index, paste0("Past_Quantile_", Col)] <- 0.5 }
+          Replace_Values_Index <- (Signal[[Col]] == 10000) %>% replace(., is.na(.), FALSE)
 
-        Dataset                <- Dataset %>% dplyr::mutate_at(dplyr::vars(dplyr::contains("Past_Quantile_")), function(x) as.numeric(x))
+          Signal[Replace_Values_Index, paste0("Past_Quantile_", Col)] <- 0.5
 
-        if (Filter_Nas)    Dataset  <-  Dataset %>% dplyr::filter_at(dplyr::vars(dplyr::contains("Past_Quantile")), dplyr::any_vars(!is.na(.)))
+        }
 
-        Dataset                     <-  Dataset %>% set_colnames(gsub("^Past_Quantile_Nrow$", "Nrow", colnames(.)))
+        Signal                     <-  Signal %>% dplyr::mutate_at(dplyr::vars(dplyr::contains("Past_Quantile_")), function(x) as.numeric(x))
 
-        Dataset
+        if (Filter_Nas)    Signal  <-  Signal %>% dplyr::filter_at(dplyr::vars(dplyr::contains("Past_Quantile")), dplyr::any_vars(!is.na(.)))
+
+        Signal                     <-  Signal %>% set_colnames(gsub("^Past_Quantile_Nrow$", "Nrow", colnames(.)))
+
+        Signal
 
       } else {
 
-        Dataset
+        Signal
 
       }
 
-    } else Dataset
+    } else Signal
 
-    Dataset
+   Signal
 
   }
 
   gc()
 
-  Dataset
+  Signal
 
 }
 

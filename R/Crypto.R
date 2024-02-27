@@ -1080,7 +1080,7 @@ Add_Historical_Quantiles <- function(Dataset,
 Read_Historical_Quantile <- function(Ticker,
                                      Granularity  = NULL){
 
-  File              <-   "./data/Cryptocurrencies.csv"
+  File              <-   "./data/Cryptocurrencies_Hist_Quantiles.csv"
 
   Dataset           <-   lapply(File, function(file) data.table::fread(file = file,  sep = ",")) %>% dplyr::bind_rows()
 

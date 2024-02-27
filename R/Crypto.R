@@ -27,11 +27,11 @@ Update_Crypto_OHLC_Multiple_Granularity <- function(Granularity                 
 
   }
 
-  Log_File       <- paste0(Base_Folder(Suffix = '', Root = T), "IG_Code_and_Documents/Confirmation_Txt_Files/Crypto_OHLC_Error.txt")
+  Log_File       <- "./helper/Crypto_OHLC_Error.txt"
 
   if (file.exists(Log_File)) file.remove(Log_File)
 
-  Crypto_Folder  <- paste0(Base_Folder(Suffix = '', Root = T), "IB_Additional_Data/Trading_Signals_CSVs/Trading_Signals/Crypto/")
+  Crypto_Folder  <- "./data/Signals/"
 
   ###
 
@@ -45,7 +45,7 @@ Update_Crypto_OHLC_Multiple_Granularity <- function(Granularity                 
 
   Minute              <- c(5, 15, 30, 60)[which(lubridate::minute(Now) %% c(5, 15, 30, 60) == 0) %>% last()]
 
-  Last_File           <- paste0(Base_Folder(Suffix = '', Root = T), "IB_Additional_Data/Trading_Signals_CSVs/Trading_Signals/Crypto/Signals_", Correct_Colnames(Now),"_", Minute, "M", ".csv")
+  Last_File           <- paste0("./data/Signals/Signals_", Correct_Colnames(Now),"_", Minute, "M", ".csv")
 
   if (file.exists(Last_File)){
 
@@ -217,9 +217,7 @@ Update_Crypto_OHLC_Multiple_Granularity <- function(Granularity                 
 
 
             if (Write_CSV) data.table::fwrite(x          = Signal,
-                                              file       = paste0(Base_Folder(Suffix = '', Root = T),
-                                                                  "IB_Additional_Data/Trading_Signals_CSVs/Trading_Signals/Crypto/Signals_",
-                                                                  Correct_Colnames(Round_Time),"_", Largest_Granularity, ".csv"),
+                                              file       = paste0("./data/Signals/Signals_", Correct_Colnames(Round_Time),"_", Largest_Granularity, ".csv"),
                                               quote      = F,
                                               row.names  = F,
                                               dateTimeAs = "write.csv")
@@ -1082,11 +1080,9 @@ Add_Historical_Quantiles <- function(Dataset,
 Read_Historical_Quantile <- function(Ticker,
                                      Granularity  = NULL){
 
-  Base              <-   Base_Folder(Root = T) %>% paste0("IG_Code_and_Documents/Clean_Hist_Stock_Data/Stocks_Stats/")
+  File              <-   "./data/Cryptocurrencies.csv"
 
-  File              <-   paste0(Base, "Cryptocurrencies.csv")
-
-  Dataset        <-   lapply(File, function(file) data.table::fread(file = file,  sep = ",")) %>% dplyr::bind_rows()
+  Dataset           <-   lapply(File, function(file) data.table::fread(file = file,  sep = ",")) %>% dplyr::bind_rows()
 
   if (!missing("Ticker")) Dataset <-  Dataset %>% dplyr::filter(Symbol %in% !!Ticker)
 
@@ -1195,12 +1191,6 @@ Crypto_Symbols_Selection <- function(Volume24h = 1000000,
                                      Only_Quotes = F,
                                      Sort_Column = "1h"){
 
-  # btc,eth
-
-  # Crypto_Info   <- From_JS(URL = "https://api.coinmarketcap.com/data-api/v3/cryptocurrency/listing?start=1&limit=1000&sortBy=volume_24h&sortType=desc&convert=USD&cryptoType=all&tagType=all&aux=ath,atl,high24h,low24h,num_market_pairs,cmc_rank,date_added,tags,platform,max_supply,circulating_supply,total_supply,volume_7d,volume_30d")
-
-  # &id=1,1027,52,1831,2; Final$id %>% paste0(collapse = ",")
-
   Crypto_Info       <-  From_JS(URL = paste0("https://api.coinmarketcap.com/data-api/v3/cryptocurrency/listing?",
                                              "start=1&limit=1000&sortBy=volume_24h&sortType=desc&convert=USD&cryptoType=all&tagType=all&volume24hRange=",
                                              as.integer(Volume24h),"~"))
@@ -1211,9 +1201,9 @@ Crypto_Symbols_Selection <- function(Volume24h = 1000000,
 
                                          Crypto_Info$data$cryptoCurrencyList$quotes %>% dplyr::bind_rows() %>% .[-match(c("lastUpdated","name"), colnames(.))]) %>%
 
-    dplyr::mutate_at(dplyr::vars(c("lastUpdated", "dateAdded")), function(x) lubridate::ymd_hms(x) %>% Convert_Time_Zones(From = "UTC")) %>% dplyr::select(-dateAdded) %>%
+                        dplyr::mutate_at(dplyr::vars(c("lastUpdated", "dateAdded")), function(x) lubridate::ymd_hms(x) %>% Convert_Time_Zones(From = "UTC")) %>% dplyr::select(-dateAdded) %>%
 
-    dplyr::filter(marketCap > 0)
+                        dplyr::filter(marketCap > 0)
 
   if (Only_Symbols){
 
@@ -1231,7 +1221,7 @@ Crypto_Symbols_Selection <- function(Volume24h = 1000000,
 
                                        dplyr::contains("percentChange"), ytdPriceChangePercentage, lastUpdated ) %>%
 
-        dplyr::arrange(-abs(!!as.name(paste0("percentChange", Sort_Column))))
+               dplyr::arrange(-abs(!!as.name(paste0("percentChange", Sort_Column))))
 
       if (Only_Quotes) Final <- Final %>% dplyr::select(symbol, price, lastUpdated)
 
@@ -1257,11 +1247,9 @@ Crypto_Symbols_Selection <- function(Volume24h = 1000000,
 
 Binance_List_of_Currencies <- function(){
 
-  # From_JS(URL = "https://www.binance.com/bapi/eoptions/v1/public/eoptions/exchange/tGroup?contract=ETHUSDT") -> bla
-
   Binance_List_of_Assets <- From_JS(URL = "https://www.binance.com/bapi/asset/v2/public/asset-service/product/get-products?includeEtf=false") %>% .$data %>%
 
-    dplyr::filter(q == "USDT")
+                            dplyr::filter(q == "USDT")
 
   Binance_List_of_Assets
 
@@ -1459,11 +1447,7 @@ Fast_ATR <- function(Dataset, N = 14){
 
   tr[1]    <- 0
 
-  # ATR      <- tryCatch(expr = {QuantTools::ema(x = tr, n = N)}, error = function(e) TTR::EMA( x = tr, n = N))
-
   ATR      <- QuantTools::ema(x = tr, n = N)
-
-  # ATR      <- TTR::EMA( x = tr, n = N)
 
   ATR
 
@@ -1494,30 +1478,13 @@ Chaikin_Vol <- function(Dataset, Volume_Weighted = FALSE, Mavg_N = 10, ROC_N = 1
 ### Various helper functions
 
 
-Base_Folder <- function(Suffix, Root = FALSE){
-
-  Base_Folder <-  if (!Root){
-
-    if (grepl("extdata", Suffix)) paste0("E:/IG_Code_and_Documents/IBOptionsSignals/inst", Suffix) else  paste0("E:/IG_Code_and_Documents/IBOptionsSignals", Suffix)
-
-  } else {
-
-    "E:/"
-
-  }
-
-  Base_Folder
-
-}
-
-
 Correct_Colnames <- function(Colnames){
 
   Colnames <- Colnames %>% stringi::stri_trans_totitle() %>%
 
-    gsub("\\.| |-|\\,|\\(|\\)|/|\\'|\\:|\\|", "_", .) %>%
+              gsub("\\.| |-|\\,|\\(|\\)|/|\\'|\\:|\\|", "_", .) %>%
 
-    gsub("__", "_", .) %>% gsub("_$|\\^", "", .) %>% gsub("&", "and", .) %>% gsub("\\s+", "_", .)
+              gsub("__", "_", .) %>% gsub("_$|\\^", "", .) %>% gsub("&", "and", .) %>% gsub("\\s+", "_", .)
 
   Colnames
 

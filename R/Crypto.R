@@ -568,8 +568,6 @@ Calculate_Trading_Signal  <- function(Dataset,
 
   if (all(is.na(Dataset$Volume))) Dataset$Volume <- 0
 
-  if (Smooth) Dataset <- Smooth_NA_Values(Dataset = Dataset)
-
   if (!("data.table" %in% class(Dataset))) {Dataset <- if ("xts" %in% class(Dataset)) timetk::tk_tbl(Dataset) %>% dplyr::rename(Date = index) %>% data.table::as.data.table(.) else data.table::data.table(Dataset)}
 
   Roll_LM_columns    <-  c(Roll_LM_columns, c("BB_Width", "atr", "RSI", "ADX"))
@@ -1454,22 +1452,16 @@ Fast_ATR <- function(Dataset, N = 14){
 }
 
 
-Chaikin_Vol <- function(Dataset, Volume_Weighted = FALSE, Mavg_N = 10, ROC_N = 10){
+Chaikin_Vol <- function(Dataset, Mavg_N = 10, ROC_N = 10){
 
   Range       <- Dataset$High - Dataset$Low
-
-  if (Volume_Weighted){
-
-    Range <- Range %>% data.frame(Range = ., Volume = Dataset$Volume) %>%
-
-      Volume_Weighted_Indicator(Column = "Range", Dataset = .)
-  }
 
   mavg        <- TTR::EMA(Range, n = Mavg_N)
 
   Chaikin_Vol <- TTR::ROC(mavg, n = ROC_N, type = "discrete")
 
   Chaikin_Vol
+
 }
 
 

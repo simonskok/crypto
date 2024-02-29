@@ -57,13 +57,11 @@ Update_Crypto_OHLC_Multiple_Granularity <- function(Granularity                 
 
   }
 
-  Stop                <-  FALSE
-
   Initiate_Parallel(N_Cores = N_Cores)
 
   Data_Symbols         <- Crypto_Symbols_Selection()
 
-  while (Sys.time() < Last_Run & !Stop){
+  while (Sys.time() < Last_Run){
 
     Data_Parameters      <- Multiple_Granularity_Parameters(Round_time_unit = Granularity)
 
@@ -236,19 +234,13 @@ Update_Crypto_OHLC_Multiple_Granularity <- function(Granularity                 
 
     Wait_For         <- as.numeric(difftime(Next_Check_Time, Sys.time(), units = "secs")) + 1
 
-    Stop             <- Sys.time() > US_Market_Open_and_Close_Hour(Time = "Close")
+    gc()
 
-    if (!Stop){
+    write(paste0("Wait for ", Wait_For, " at ", Sys.time()) , file = Log_File, append = TRUE)
 
-      gc()
+    print(paste("Sleep for:", Wait_For))
 
-      write(paste0("Wait for ", Wait_For, " at ", Sys.time()) , file = Log_File, append = TRUE)
-
-      print(paste("Sleep for:", Wait_For))
-
-      Sys.sleep(Wait_For)
-
-    }
+    Sys.sleep(Wait_For)
 
   }
 
@@ -1183,17 +1175,15 @@ Unregister_Parallel <- function() {
 #' @return
 #' @export
 
-Crypto_Symbols_Selection <- function(Volume24h = 1000000,
-                                     Filter_Tickers = T,
-                                     Only_Symbols = T,
-                                     Only_Quotes = F,
-                                     Sort_Column = "1h"){
+Crypto_Symbols_Selection <- function(Volume24h                   = 1000000,
+                                     Symbols_with_Hist_Quantiles = F,
+                                     Only_Symbols                = T,
+                                     Only_Quotes                 = F,
+                                     Sort_Column                 = "1h"){
 
   Crypto_Info       <-  From_JS(URL = paste0("https://api.coinmarketcap.com/data-api/v3/cryptocurrency/listing?",
                                              "start=1&limit=1000&sortBy=volume_24h&sortType=desc&convert=USD&cryptoType=all&tagType=all&volume24hRange=",
                                              as.integer(Volume24h),"~"))
-
-  Hist_Quantiles    <-  Read_Historical_Quantile()
 
   Final             <-  dplyr::bind_cols(Crypto_Info$data$cryptoCurrencyList %>% purrr::keep(~!(.x %>% is.list)),
 
@@ -1201,39 +1191,70 @@ Crypto_Symbols_Selection <- function(Volume24h = 1000000,
 
                         dplyr::mutate_at(dplyr::vars(c("lastUpdated", "dateAdded")), function(x) lubridate::ymd_hms(x) %>% Convert_Time_Zones(From = "UTC")) %>% dplyr::select(-dateAdded) %>%
 
-                        dplyr::filter(marketCap > 0)
+                        dplyr::filter(marketCap > 0) %>% dplyr::arrange(-Volume24h)
+
+  if (Symbols_with_Hist_Quantiles){
+
+    Hist_Quantiles    <-  Read_Historical_Quantile()
+
+    Hist_Symbols      <-  unique(Hist_Quantiles$Symbol)
+
+    Final             <-  Final %>% dplyr::filter(symbol %in% Hist_Symbols)
+
+  }
 
   if (Only_Symbols){
 
-    Hist_Symbols <- unique(Hist_Quantiles$Symbol)
-
-    if (Filter_Tickers) Final <- Final %>% dplyr::filter(symbol %in% Hist_Symbols)
-
-    return(setdiff( Final$symbol, c("BUSD", "TUSD", "USDC", "PAX","SUSD", "PAXG")))
+    return(Final$symbol)
 
   } else {
 
-    if (Filter_Tickers){
+    Final <- Final %>% dplyr::select(name, symbol, id, price, dplyr::contains("volume"),
 
-      Final <- Final %>% dplyr::select(name, symbol, id, price, dplyr::contains("volume"),
+                                     dplyr::contains("percentChange"), ytdPriceChangePercentage, lastUpdated ) %>%
 
-                                       dplyr::contains("percentChange"), ytdPriceChangePercentage, lastUpdated ) %>%
+             dplyr::arrange(-abs(!!as.name(paste0("percentChange", Sort_Column))))
 
-               dplyr::arrange(-abs(!!as.name(paste0("percentChange", Sort_Column))))
+    if (Only_Quotes) Final <- Final %>% dplyr::select(symbol, price, lastUpdated)
 
-      if (Only_Quotes) Final <- Final %>% dplyr::select(symbol, price, lastUpdated)
-
-      Final
-
-    } else {
-
-      Final <- Crypto_Largest_Movers(Period = Sort_Column)
-
-    }
-
-    return(Final)
+    Final
 
   }
+
+}
+
+#' Title
+#'
+#' @param Period 1h/24h/7d/30d
+#' @param Selection_Columns
+#' @param Top_N
+#'
+#' @return
+#' @export
+
+Crypto_Largest_Movers <- function(Period            = "1h",
+                                  Top_N             = 10,
+                                  Selection_Columns = T){
+
+  Largest_movers <- From_JS(URL = paste0("https://api.coinmarketcap.com/data-api/v3/cryptocurrency/spotlight?dataType=2&limit=",Top_N,"&rankRange=500&timeframe=", Period))
+
+  Largest_movers <- Largest_movers$data %>% purrr::map(~.x  %>% do.call("cbind", .) %>%
+
+                                                         set_colnames(gsub("priceChange\\.", "", colnames(.)))) %>%
+
+                    dplyr::bind_rows() %>% dplyr::arrange(-abs(!!as.name(paste0("priceChange", Period)))) %>% dplyr::select(-id) %>%
+
+                    dplyr::mutate(lastUpdate = Convert_Time_Zones(lubridate::ymd_hms(lastUpdate), From = "UTC")) %>% dplyr::rename(Time = lastUpdate)
+
+  if (Selection_Columns){
+
+    Largest_movers <- Largest_movers %>%  dplyr::select(Time, symbol, name, marketCap, price,
+                                                        !!as.name(paste0("priceChange", Period)),
+                                                        if (paste0("volume", Period) %in% colnames(.)) paste0("volume", Period))
+
+  }
+
+  Largest_movers
 
 }
 
@@ -1257,7 +1278,7 @@ Binance_List_of_Currencies <- function(){
 #' OHLC Data from Binance
 #'
 #' @param Symbols Any of the symbol(s) from Binance_List_of_Currencies
-#' @param Interval 1, 5, 15, 30, 60, 1d, 1w
+#' @param Interval 1, 5, 15, 30, 60, 1d, 1w; if numeric then minutes
 #' @param Count Nr of candles returned
 #' @param Add_Candle_Column
 #' @param Only_full_candles
@@ -1309,61 +1330,89 @@ Crypto_OHLC_Data <- function(Symbols,
 
                                                            error = function(e) NULL))
 
+  OHLC_Data <- purrr::map_depth(.x     = OHLC_Data,
+
+                                .depth = 1,
+
+                                 function(x) purrr::compact(x))
+
   OHLC_Data <- OHLC_Data %>% lapply(function(x) Imap_and_rbind(x))
 
   OHLC_Data <- purrr::imap(OHLC_Data, function(x, y){
 
-    Interval_for_round_time  <-  if (!grepl("\\D", y)) paste0(y, "m") else tolower(y)
+                if (length(x) > 0){
 
-    if (Interval_for_round_time == "60m") Interval_for_round_time <- "1h"
+                  Interval_for_round_time  <-  if (!grepl("\\D", y)) paste0(y, "m") else tolower(y)
 
-    Round_Time               <-  lubridate::floor_date(Sys.time(), unit = toupper(Interval_for_round_time))
+                  if (Interval_for_round_time == "60m") Interval_for_round_time <- "1h"
 
-    multiplier               <-  if (grepl("m$", Interval_for_round_time)) as.numeric(gsub("m", "", Interval_for_round_time))*60 else if (grepl("h$", Interval_for_round_time)) as.numeric(gsub("h", "", Interval_for_round_time))*3600 else if (grepl("d$", Interval_for_round_time)) 86400 else 86400*7
+                  Round_Time               <-  lubridate::floor_date(Sys.time(), unit = toupper(Interval_for_round_time))
 
-    x                        <-  x %>%
+                  multiplier               <-  if (grepl("m$", Interval_for_round_time)) as.numeric(gsub("m", "", Interval_for_round_time))*60 else if (grepl("h$", Interval_for_round_time)) as.numeric(gsub("h", "", Interval_for_round_time))*3600 else if (grepl("d$", Interval_for_round_time)) 86400 else 86400*7
 
-      {if (grepl("m$|h$", Interval_for_round_time)) dplyr::mutate(., Time = Numeric_to_Date(Time, Divisor = 1000) %>% Convert_Time_Zones(From = "UTC")) else dplyr::mutate(., Time = Numeric_to_Date(Time, Divisor = 1000) %>% as.Date())} %>%
+                  x                        <-  x %>%
 
-      {if (grepl("m$|h$", Interval_for_round_time)) dplyr::mutate(., Time = Time + multiplier) else . } %>%
+                                              {if (grepl("m$|h$", Interval_for_round_time)) dplyr::mutate(., Time = Numeric_to_Date(Time, Divisor = 1000) %>% Convert_Time_Zones(From = "UTC")) else dplyr::mutate(., Time = Numeric_to_Date(Time, Divisor = 1000) %>% as.Date())} %>%
 
-      {if (grepl("m$|h$", Interval_for_round_time)) dplyr::filter(., Time <= Round_Time) else . } %>%
+                                              {if (grepl("m$|h$", Interval_for_round_time)) dplyr::mutate(., Time = Time + multiplier) else . } %>%
 
-      dplyr::group_by(Symbol) %>% dplyr::filter(dplyr::last(Close) > 0.01) %>% dplyr::ungroup()
+                                              {if (grepl("m$|h$", Interval_for_round_time)) dplyr::filter(., Time <= Round_Time) else . }
 
-    x
+                  Max_Time                 <- max(x$Time)
 
-  })
+                  x                        <- x %>% dplyr::group_by(Symbol) %>% dplyr::filter(dplyr::last(Time) == Max_Time) %>% dplyr::ungroup()
 
-  names(OHLC_Data) <- as.vector(sapply(names(OHLC_Data), function(interval) if (!interval %in% c("D", "1D","W", "1W")) paste0(gsub("M$", "", interval) %>% gsub("1H$", "60", . ), "_Min") else gsub("^1", "", interval)))
+                  x
 
-  if ("W" %in% names(OHLC_Data)){
+                }
 
-    Last_Monday      <- Last_Friday() + 3
+              }) %>% purrr::compact()
 
-    OHLC_Data[["W"]] <- OHLC_Data[["W"]] %>% {if (Only_full_candles) dplyr::filter(. , as.Date(Time) <= Last_Monday) else . }
+  if (length(OHLC_Data) > 0){
+
+    names(OHLC_Data) <- as.vector(sapply(names(OHLC_Data), function(interval) if (!interval %in% c("D", "1D","W", "1W")) paste0(gsub("M$", "", interval) %>% gsub("1H$", "60", . ), "_Min") else gsub("^1", "", interval)))
+
+    if (Only_full_candles){
+
+      if (any(c("D", "W") %in% names(OHLC_Data))){
+
+        if ("W" %in% names(OHLC_Data)){
+
+          Last_Monday      <- Last_Friday() + 3
+
+          OHLC_Data[["W"]] <- OHLC_Data[["W"]] %>% dplyr::filter(. , as.Date(Time) <= Last_Monday)
+
+        } else {
+
+          OHLC_Data[["D"]] <- OHLC_Data[["D"]] %>% dplyr::filter(. , as.Date(Time) < Sys.Date())
+
+        }
+
+      }
+
+    }
+
+    if (any(c("D","W") %in% names(OHLC_Data))){
+
+      OHLC_Data <- lapply(names(OHLC_Data), function(interval){
+
+                    if (interval %in% c("D","W")) OHLC_Data[[interval]]$Time <- as.Date(OHLC_Data[[interval]]$Time)
+
+                    OHLC_Data[[interval]]
+
+                  }) %>% set_names(names(OHLC_Data))
+
+    }
+
+    if (Add_Candle_Column)  OHLC_Data <- OHLC_Data %>% Imap_and_rbind(New_Column_Name = "Candle")
+
+    OHLC_Data
+
+  } else {
+
+    OHLC_Data <- NULL
 
   }
-
-  if ("D" %in% names(OHLC_Data)){
-
-    OHLC_Data[["D"]] <- OHLC_Data[["D"]] %>% {if (Only_full_candles) dplyr::filter(. , as.Date(Time) < Sys.Date()) else . }
-
-  }
-
-  if (any(c("D", "1D","W", "1W") %in% names(OHLC_Data))){
-
-    OHLC_Data <- lapply(names(OHLC_Data), function(interval){
-
-      if (interval %in% c("D", "1D","W", "1W")) OHLC_Data[[interval]]$Time <- as.Date(OHLC_Data[[interval]]$Time)
-
-      OHLC_Data[[interval]]
-
-    }) %>% set_names(names(OHLC_Data))
-
-  }
-
-  if (Add_Candle_Column)  OHLC_Data <- OHLC_Data %>% Imap_and_rbind(New_Column_Name = "Candle")
 
   OHLC_Data
 

@@ -52,7 +52,9 @@ Update_Crypto_OHLC_Multiple_Granularity(Granularity = "15M", N_symbols = 100, Du
 ```
 This will write a CSV file every 15 Min with the quantitative signals obtained in the step above.
 
+# Contact
 
+Any suggestions or comments are welcome, write to simonskok@yahoo.com. If you are a developer who finds a great way to embed this code and data into their application, please let me know.
 
 
 
